@@ -1,0 +1,21 @@
+# binaries
+/bulkde
+/folh1diff
+
+# local outputs / scratch
+/_tmp_*/
+
+# local R libraries (installed deps)
+/r_libs/
+/r_libs_*/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# R session files
+.Rhistory
+.RData
+.Rproj.user/
+
