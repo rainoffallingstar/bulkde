@@ -38,6 +38,7 @@ jobs:
         run: |
           bash scripts/ci/install_rvx.sh
           echo "$PWD/.ci-bin" >> "$GITHUB_PATH"
+          export PATH="$PWD/.ci-bin:$PATH"
           which rvx
           (rvx --help 2>&1 | head -n 3) || true
       - name: E2E (GSE116899)
