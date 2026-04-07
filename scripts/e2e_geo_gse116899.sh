@@ -5,6 +5,7 @@ set -euo pipefail
 # Dataset: GSE116899 (human neutrophils, featureCounts matrix with Geneid/Chr/Start/End/Strand/Length + samples).
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PATH="${ROOT_DIR}/.ci-bin:${PATH}"
 
 GSE_ID="${BULKDE_E2E_GSE_ID:-GSE116899}"
 URL="${BULKDE_E2E_URL:-https://ftp.ncbi.nlm.nih.gov/geo/series/GSE116nnn/GSE116899/suppl/GSE116899_ra-neut-counts-EnsembIDs-GRCh37.p10.txt.gz}"
