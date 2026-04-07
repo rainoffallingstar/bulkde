@@ -60,6 +60,7 @@ if curl "${curl_args[@]}" "${api}" -o "${tmp_json}"; then
       # Determine type by filename if possible; otherwise by magic.
       asset_name="$(basename "${asset_url}")"
       if [[ "${asset_name}" =~ \.zip$ ]]; then
+        mkdir -p "${tmp_dir}/unzip"
         unzip -q "${asset_path}" -d "${tmp_dir}/unzip"
         found="$(find "${tmp_dir}/unzip" -type f -name rvx -o -name rvx.exe | head -n 1 || true)"
         if [[ -z "${found}" ]]; then
@@ -71,6 +72,7 @@ if curl "${curl_args[@]}" "${api}" -o "${tmp_json}"; then
           exit 0
         fi
       elif [[ "${asset_name}" =~ \.(tar\.gz|tgz)$ ]]; then
+        mkdir -p "${tmp_dir}/untar"
         tar -xzf "${asset_path}" -C "${tmp_dir}/untar"
         found="$(find "${tmp_dir}/untar" -type f -name rvx -o -name rvx.exe | head -n 1 || true)"
         if [[ -z "${found}" ]]; then
@@ -108,4 +110,3 @@ fi
 
 echo "[install_rvx] ERROR: could not install rvx (no matching release asset; go fallback disabled)" >&2
 exit 2
-
