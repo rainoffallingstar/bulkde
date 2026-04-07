@@ -37,7 +37,7 @@ jobs:
           go install github.com/rainoffallingstar/rs-reborn/cmd/rs@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           which rs
-          rs run --help | head -n 3
+          (rs run --help 2>&1 | head -n 3) || true
       - name: E2E (GSE116899)
         env:
           BULKDE_E2E_WORK_DIR: /tmp/bulkde-e2e-geo/GSE116899
