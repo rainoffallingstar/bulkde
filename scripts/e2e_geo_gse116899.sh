@@ -17,8 +17,15 @@ NO_INSTALL="${BULKDE_E2E_NO_INSTALL:-0}" # default to self-contained (may instal
 
 mkdir -p "${WORK_DIR}" "${OUT_DIR}"
 
-if ! command -v rs >/dev/null 2>&1 || ! rs run --help >/dev/null 2>&1; then
+if ! command -v rs >/dev/null 2>&1; then
   echo "[bulkde-e2e] ERROR: rs-reborn CLI not found on PATH (needs `rs run`)." >&2
+  echo "[bulkde-e2e] Hint: go install github.com/rainoffallingstar/rs-reborn/cmd/rs@latest" >&2
+  exit 2
+fi
+
+rs_help="$(rs run --help 2>&1 || true)"
+if ! echo "${rs_help}" | grep -qi "usage: rs run"; then
+  echo "[bulkde-e2e] ERROR: `rs` found but does not look like rs-reborn (missing `usage: rs run`)." >&2
   echo "[bulkde-e2e] Hint: go install github.com/rainoffallingstar/rs-reborn/cmd/rs@latest" >&2
   exit 2
 fi

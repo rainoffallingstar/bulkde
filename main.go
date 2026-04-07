@@ -318,6 +318,12 @@ func looksLikeRSReborn(rsPath string) (bool, string) {
 	// so we validate the subcommand exists to avoid false positives.
 	cmd := exec.Command(rsPath, "run", "--help")
 	out, err := cmd.CombinedOutput()
+	help := strings.ToLower(string(out))
+	// Some implementations print usage to stderr and exit non-zero even when --help is passed
+	// (e.g. "missing R script path"). That's still a strong signal that this is rs-reborn.
+	if strings.Contains(help, "usage: rs run") {
+		return true, ""
+	}
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {
@@ -325,11 +331,7 @@ func looksLikeRSReborn(rsPath string) (bool, string) {
 		}
 		return false, msg
 	}
-	help := strings.ToLower(string(out))
-	if strings.Contains(help, "rs run") || strings.Contains(help, "usage: rs run") {
-		return true, ""
-	}
-	return false, "unexpected help output (missing `rs run` usage)"
+	return false, "unexpected help output (missing `usage: rs run`)"
 }
 
 func bool01(b bool) string {
