@@ -377,6 +377,13 @@ merge_with_annot <- function(res_df) {
   merge(annot_filtered, res_df, by = "gene_id", all.y = TRUE, sort = FALSE)
 }
 
+add_comparison_cols <- function(df) {
+  df$case <- case_used
+  df$control <- control_used
+  df$comparison <- paste0(case_used, "_vs_", control_used)
+  df
+}
+
 write_sig_table <- function(df, file_name, padj_col = "FDR") {
   sig <- df[!is.na(df[[padj_col]]) & df[[padj_col]] < fdr_threshold & abs(df$log2FC) >= lfc_threshold, , drop = FALSE]
   write.table(sig, file = file.path(out_dir, file_name), sep = "\t", row.names = FALSE, quote = FALSE)
@@ -400,6 +407,7 @@ design_terms <- c(covariates, "group")
 design_formula <- as.formula(paste("~", paste(design_terms, collapse = " + ")))
 
 design <- model.matrix(design_formula, data = analysis_df)
+rownames(design) <- analysis_df$sample
 case_coef_name <- paste0("group", make.names(case_used))
 coef_idx <- which(colnames(design) == case_coef_name)
 if (length(coef_idx) != 1) {
@@ -415,10 +423,13 @@ contrast_out <- data.frame(term = colnames(design), weight = as.numeric(contrast
 write.table(contrast_out, file = file.path(out_dir, "contrast.tsv"), sep = "\t", row.names = FALSE, quote = FALSE)
 
 message("Comparison (log2FC direction): ", case_used, " - ", control_used)
+message("Interpretation: log2FC > 0 means higher expression in case (", case_used, ") compared to control (", control_used, ").")
+message("Group factor levels (baseline first): ", paste(levels(analysis_df$group), collapse = " < "))
 message("Design formula: ", paste(deparse(design_formula), collapse = " "))
 message("Design matrix dim: ", nrow(design), " x ", ncol(design))
 message("Design columns: ", paste(colnames(design), collapse = ", "))
 message("Contrast column: ", colnames(design)[coef_idx])
+message("Contrast weights: ", paste(sprintf("%s:%g", colnames(design), as.numeric(contrast)), collapse = ", "))
 message("Design matrix preview (first 6 rows):\n", paste(capture.output(utils::head(design)), collapse = "\n"))
 
 deseq_out <- NULL
@@ -439,6 +450,7 @@ if ("limma" %in% methods) {
   limma_out <- limma_tbl[, c("gene_id", "log2FC", "AveExpr", "t", "P.Value", "adj.P.Val", "B", "pvalue", "padj")]
   colnames(limma_out)[colnames(limma_out) == "adj.P.Val"] <- "FDR"
   limma_out <- merge_with_annot(limma_out)
+  limma_out <- add_comparison_cols(limma_out)
   write.table(limma_out, file = file.path(out_dir, "limma_all.tsv"), sep = "\t", row.names = FALSE, quote = FALSE)
   write_sig_table(limma_out, "limma_sig.tsv", padj_col = "FDR")
 }
@@ -462,6 +474,7 @@ if ("deseq2" %in% methods) {
   deseq_out <- deseq_tbl[, c("gene_id", "baseMean", "log2FC", "lfcSE", "stat", "pvalue", "padj")]
   colnames(deseq_out)[colnames(deseq_out) == "padj"] <- "FDR"
   deseq_out <- merge_with_annot(deseq_out)
+  deseq_out <- add_comparison_cols(deseq_out)
   write.table(deseq_out, file = file.path(out_dir, "deseq2_all.tsv"), sep = "\t", row.names = FALSE, quote = FALSE)
   write_sig_table(deseq_out, "deseq2_sig.tsv", padj_col = "FDR")
 }
@@ -476,6 +489,7 @@ if ("edger" %in% methods) {
   edger_tbl <- transform(edger_tbl, log2FC = logFC, pvalue = PValue, padj = FDR)
   edger_out <- edger_tbl[, c("gene_id", "log2FC", "logCPM", "F", "PValue", "FDR", "pvalue", "padj")]
   edger_out <- merge_with_annot(edger_out)
+  edger_out <- add_comparison_cols(edger_out)
   write.table(edger_out, file = file.path(out_dir, "edger_all.tsv"), sep = "\t", row.names = FALSE, quote = FALSE)
   write_sig_table(edger_out, "edger_sig.tsv", padj_col = "FDR")
 }
