@@ -39,7 +39,8 @@ type config struct {
 	cacheDir        string
 	compatRLib      string
 	noInstall       bool
-	rsPath          string
+	rvxPath         string
+	compatRsPath    string
 
 	minCount        string
 	minSamples      string
@@ -162,7 +163,8 @@ func main() {
 	fs.StringVar(&cfg.cacheDir, "cache-dir", "", "rs-reborn cache dir (default: <counts_dir>/r_libs)")
 	fs.StringVar(&cfg.compatRLib, "r-lib", "", "Alias of --cache-dir (compat)")
 	fs.BoolVar(&cfg.noInstall, "no-install", false, "Do not attempt to install R packages (fail if missing)")
-	fs.StringVar(&cfg.rsPath, "rs-path", "", "Path to rs-reborn CLI binary (default: find `rs` from PATH)")
+	fs.StringVar(&cfg.rvxPath, "rvx-path", "", "Path to rs-reborn CLI binary (rvx; default: find `rvx` from PATH)")
+	fs.StringVar(&cfg.compatRsPath, "rs-path", "", "Alias of --rvx-path (compat; old binary name)")
 
 	_ = fs.Parse(args)
 	if err := cfg.validate(); err != nil {
@@ -240,8 +242,12 @@ func main() {
 
 	exclude := excludeDepsForMethods(cfg.methods)
 
-	if err := runWithRSCLI(runWithRSCLIOptions{
-		RSPath:     cfg.rsPath,
+	runnerPath := cfg.rvxPath
+	if runnerPath == "" {
+		runnerPath = cfg.compatRsPath
+	}
+	if err := runWithRebornCLI(runWithRebornCLIOptions{
+		RunnerPath: runnerPath,
 		CacheDir:   cacheDirAbs,
 		SkipInstall: cfg.noInstall,
 		Exclude:    exclude,
@@ -254,8 +260,8 @@ func main() {
 	}
 }
 
-type runWithRSCLIOptions struct {
-	RSPath      string
+type runWithRebornCLIOptions struct {
+	RunnerPath  string
 	CacheDir    string
 	SkipInstall bool
 	Exclude     []string
@@ -264,17 +270,25 @@ type runWithRSCLIOptions struct {
 	Env         map[string]string
 }
 
-func runWithRSCLI(opt runWithRSCLIOptions) error {
-	rsPath := strings.TrimSpace(opt.RSPath)
-	if rsPath == "" {
-		p, err := exec.LookPath("rs")
-		if err != nil {
-			return fmt.Errorf("rs CLI not found in PATH; please install rs-reborn (e.g. `go install github.com/rainoffallingstar/rs-reborn/cmd/rs@latest`) or pass --rs-path: %w", err)
+func runWithRebornCLI(opt runWithRebornCLIOptions) error {
+	runnerPath := strings.TrimSpace(opt.RunnerPath)
+	runnerName := ""
+	if runnerPath == "" {
+		if p, err := exec.LookPath("rvx"); err == nil {
+			runnerPath = p
+			runnerName = "rvx"
+		} else if p, err := exec.LookPath("rs"); err == nil {
+			runnerPath = p
+			runnerName = "rs"
+		} else {
+			return fmt.Errorf("rvx CLI not found in PATH; please install rs-reborn runner (e.g. `go install github.com/rainoffallingstar/rs-reborn/cmd/rvx@latest`) or pass --rvx-path")
 		}
-		rsPath = p
 	}
-	if ok, why := looksLikeRSReborn(rsPath); !ok {
-		return fmt.Errorf("found `rs` at %s but it does not look like rs-reborn (`rs run` not available): %s. Please install rs-reborn and ensure it is first on PATH, or pass --rs-path to the correct binary", rsPath, why)
+	if runnerName == "" {
+		runnerName = filepath.Base(runnerPath)
+	}
+	if ok, why := looksLikeRebornRunner(runnerPath); !ok {
+		return fmt.Errorf("found runner at %s but it does not look like rs-reborn (missing `%s run` usage): %s. Please install rs-reborn runner and ensure it is first on PATH, or pass --rvx-path to the correct binary", runnerPath, runnerName, why)
 	}
 
 	args := []string{"run", "--cache-dir", opt.CacheDir}
@@ -290,9 +304,9 @@ func runWithRSCLI(opt runWithRSCLIOptions) error {
 	args = append(args, opt.ScriptPath)
 	args = append(args, opt.ScriptArgs...)
 
-	fmt.Fprintf(os.Stderr, "bulkde: exec: %s %s\n", rsPath, strings.Join(args, " "))
+	fmt.Fprintf(os.Stderr, "bulkde: exec: %s %s\n", runnerPath, strings.Join(args, " "))
 
-	cmd := exec.Command(rsPath, args...)
+	cmd := exec.Command(runnerPath, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -312,11 +326,13 @@ func runWithRSCLI(opt runWithRSCLIOptions) error {
 	return nil
 }
 
-func looksLikeRSReborn(rsPath string) (bool, string) {
+func looksLikeRebornRunner(runnerPath string) (bool, string) {
 	// Note: many systems already ship a different `/usr/bin/rs` (column formatting tool),
 	// so we validate presence of the "run" subcommand and the script-based usage shape.
 	//
 	// rs-reborn typically contains a line like:
+	//   rvx run [flags] path/to/script.R [script args...]
+	// or:
 	//   rs run [flags] path/to/script.R [script args...]
 	// Some versions print this under `rs --help` (top-level), some under `rs run --help`,
 	// and some exit non-zero for `--help`. We accept any of these as long as the text matches.
@@ -325,17 +341,20 @@ func looksLikeRSReborn(rsPath string) (bool, string) {
 		if strings.Contains(h, "rs manages a lightweight per-script r library") {
 			return true
 		}
-		if strings.Contains(h, "rs run [flags]") && strings.Contains(h, "script.r") {
+		if strings.Contains(h, " run [flags]") && strings.Contains(h, "script.r") {
 			return true
 		}
 		if strings.Contains(h, "usage: rs run") {
+			return true
+		}
+		if strings.Contains(h, "usage: rvx run") {
 			return true
 		}
 		return false
 	}
 
 	try := func(args ...string) (bool, string) {
-		cmd := exec.Command(rsPath, args...)
+		cmd := exec.Command(runnerPath, args...)
 		out, err := cmd.CombinedOutput()
 		txt := string(out)
 		if matches(txt) {

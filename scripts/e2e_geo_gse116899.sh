@@ -17,19 +17,28 @@ NO_INSTALL="${BULKDE_E2E_NO_INSTALL:-0}" # default to self-contained (may instal
 
 mkdir -p "${WORK_DIR}" "${OUT_DIR}"
 
-if ! command -v rs >/dev/null 2>&1; then
-  echo "[bulkde-e2e] ERROR: rs-reborn CLI not found on PATH (needs: rs run)." >&2
-  echo "[bulkde-e2e] Hint: go install github.com/rainoffallingstar/rs-reborn/cmd/rs@latest" >&2
+RUNNER_BIN="${BULKDE_E2E_RUNNER_BIN:-}"
+if [[ -z "${RUNNER_BIN}" ]]; then
+  if command -v rvx >/dev/null 2>&1; then
+    RUNNER_BIN="rvx"
+  elif command -v rs >/dev/null 2>&1; then
+    RUNNER_BIN="rs"
+  fi
+fi
+
+if [[ -z "${RUNNER_BIN}" ]]; then
+  echo "[bulkde-e2e] ERROR: rs-reborn runner not found on PATH (needs: rvx run)." >&2
+  echo "[bulkde-e2e] Hint: go install github.com/rainoffallingstar/rs-reborn/cmd/rvx@latest" >&2
   exit 2
 fi
 
-rs_help="$(rs --help 2>&1 || true)"
-if ! echo "${rs_help}" | grep -Eqi "rs run \\[flags\\].*script\\.r"; then
-  rs_help="$(rs run --help 2>&1 || true)"
+runner_help="$("${RUNNER_BIN}" --help 2>&1 || true)"
+if ! echo "${runner_help}" | grep -Eqi "(rs|rvx) run \\[flags\\].*script\\.r"; then
+  runner_help="$("${RUNNER_BIN}" run --help 2>&1 || true)"
 fi
-if ! echo "${rs_help}" | grep -Eqi "rs run \\[flags\\].*script\\.r"; then
-  echo "[bulkde-e2e] ERROR: rs found but does not look like rs-reborn (missing: rs run [flags] path/to/script.R ...)." >&2
-  echo "[bulkde-e2e] Hint: go install github.com/rainoffallingstar/rs-reborn/cmd/rs@latest" >&2
+if ! echo "${runner_help}" | grep -Eqi "(rs|rvx) run \\[flags\\].*script\\.r"; then
+  echo "[bulkde-e2e] ERROR: runner found but does not look like rs-reborn (missing: rvx run [flags] path/to/script.R ...)." >&2
+  echo "[bulkde-e2e] Hint: go install github.com/rainoffallingstar/rs-reborn/cmd/rvx@latest" >&2
   exit 2
 fi
 

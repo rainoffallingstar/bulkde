@@ -45,7 +45,9 @@ Outputs under `--out`:
 
 ## Notes
 
-- Requires `R` and the `rs` CLI from `rs-reborn` on PATH. `bulkde` executes `rs run ...` to resolve R packages into an isolated cache, then runs the embedded R script.
-- `--cache-dir` controls the rs-reborn cache root (default: `<counts_dir>/r_libs`). `--r-lib` is a backwards-compatible alias. You can override the `rs` binary path via `--rs-path`.
-- Some systems already ship a different `/usr/bin/rs` tool (not rs-reborn). `bulkde` will validate `rs run --help` is available, otherwise it will error and ask you to pass `--rs-path`.
+- Requires `R` and the runner CLI from `rs-reborn` on PATH. The upstream binary was renamed from `rs` to `rvx`; `bulkde` will prefer `rvx` and can fall back to `rs` if present.
+- `bulkde` executes `rvx run ...` to resolve R packages into an isolated cache, then runs the embedded R script.
+- `--cache-dir` controls the rs-reborn cache root (default: `<counts_dir>/r_libs`). `--r-lib` is a backwards-compatible alias.
+- You can override the runner binary path via `--rvx-path` (`--rs-path` is a compat alias).
+- Some systems ship a different `/usr/bin/rs` tool (not rs-reborn). Prefer using `rvx` to avoid name conflicts.
 - Backwards compatible alias: `--count` works as alias of `--counts`.
