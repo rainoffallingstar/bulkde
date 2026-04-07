@@ -20,6 +20,10 @@ getenv1 <- function(key, default = "") {
 
 as_bool <- function(x) tolower(x) %in% c("1", "true", "t", "yes", "y")
 
+# rs-reborn manages the library location and injects it via .libPaths().
+local_lib <- .libPaths()[[1]]
+no_install <- as_bool(getenv1("BULKDE_NO_INSTALL", "0"))
+
 # Config (from env)
 gene_id_col <- getenv1("BULKDE_GENE_ID_COL", "ID")
 annot_prefix <- getenv1("BULKDE_ANNOT_PREFIX", "gene_")
@@ -415,6 +419,7 @@ message("Design formula: ", paste(deparse(design_formula), collapse = " "))
 message("Design matrix dim: ", nrow(design), " x ", ncol(design))
 message("Design columns: ", paste(colnames(design), collapse = ", "))
 message("Contrast column: ", colnames(design)[coef_idx])
+message("Design matrix preview (first 6 rows):\n", paste(capture.output(utils::head(design)), collapse = "\n"))
 
 deseq_out <- NULL
 edger_out <- NULL

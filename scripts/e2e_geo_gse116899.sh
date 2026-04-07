@@ -17,6 +17,12 @@ NO_INSTALL="${BULKDE_E2E_NO_INSTALL:-0}" # default to self-contained (may instal
 
 mkdir -p "${WORK_DIR}" "${OUT_DIR}"
 
+if ! command -v rs >/dev/null 2>&1 || ! rs run --help >/dev/null 2>&1; then
+  echo "[bulkde-e2e] ERROR: rs-reborn CLI not found on PATH (needs `rs run`)." >&2
+  echo "[bulkde-e2e] Hint: go install github.com/rainoffallingstar/rs-reborn/cmd/rs@latest" >&2
+  exit 2
+fi
+
 RAW_GZ="${WORK_DIR}/${GSE_ID}.counts.txt.gz"
 COUNTS_TSV="${WORK_DIR}/${GSE_ID}.counts.subset.tsv"
 META_TSV="${WORK_DIR}/${GSE_ID}.meta.tsv"

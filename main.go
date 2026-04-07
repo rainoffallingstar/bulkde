@@ -7,10 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/rainoffallingstar/rs-reborn/pkg/runner"
 )
 
 //go:embed scripts/bulkde.R
@@ -40,6 +39,7 @@ type config struct {
 	cacheDir        string
 	compatRLib      string
 	noInstall       bool
+	rsPath          string
 
 	minCount        string
 	minSamples      string
@@ -162,6 +162,7 @@ func main() {
 	fs.StringVar(&cfg.cacheDir, "cache-dir", "", "rs-reborn cache dir (default: <counts_dir>/r_libs)")
 	fs.StringVar(&cfg.compatRLib, "r-lib", "", "Alias of --cache-dir (compat)")
 	fs.BoolVar(&cfg.noInstall, "no-install", false, "Do not attempt to install R packages (fail if missing)")
+	fs.StringVar(&cfg.rsPath, "rs-path", "", "Path to rs-reborn CLI binary (default: find `rs` from PATH)")
 
 	_ = fs.Parse(args)
 	if err := cfg.validate(); err != nil {
@@ -234,56 +235,108 @@ func main() {
 		"BULKDE_METHODS":            cfg.methods,
 		"BULKDE_FDR":                cfg.fdrThreshold,
 		"BULKDE_LFC":                cfg.lfcThreshold,
+		"BULKDE_NO_INSTALL":         bool01(cfg.noInstall),
 	}
 
 	exclude := excludeDepsForMethods(cfg.methods)
 
-	if err := withEnv(env, func() error {
-		return runner.Run(runner.RunOptions{
-			ScriptPath:    scriptPath,
-			ScriptArgs:    []string{countAbs, outAbs},
-			CacheDir:      cacheDirAbs,
-			SkipInstall:   cfg.noInstall,
-			ExcludeDeps:   exclude,
-			Stdout:        os.Stdout,
-			Stderr:        os.Stderr,
-			AutoInstallR:  false,
-			Verbose:       false,
-			Locked:        false,
-			Frozen:        false,
-			BootstrapToolchain: false,
-		})
+	if err := runWithRSCLI(runWithRSCLIOptions{
+		RSPath:     cfg.rsPath,
+		CacheDir:   cacheDirAbs,
+		SkipInstall: cfg.noInstall,
+		Exclude:    exclude,
+		ScriptPath: scriptPath,
+		ScriptArgs: []string{countAbs, outAbs},
+		Env:        env,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: differential analysis failed:", err)
 		os.Exit(1)
 	}
 }
 
-func withEnv(kv map[string]string, fn func() error) error {
-	// Save old values and restore after run (runner inherits from os.Environ()).
-	old := make(map[string]*string, len(kv))
-	for k, v := range kv {
-		if v == "" {
+type runWithRSCLIOptions struct {
+	RSPath      string
+	CacheDir    string
+	SkipInstall bool
+	Exclude     []string
+	ScriptPath  string
+	ScriptArgs  []string
+	Env         map[string]string
+}
+
+func runWithRSCLI(opt runWithRSCLIOptions) error {
+	rsPath := strings.TrimSpace(opt.RSPath)
+	if rsPath == "" {
+		p, err := exec.LookPath("rs")
+		if err != nil {
+			return fmt.Errorf("rs CLI not found in PATH; please install rs-reborn (e.g. `go install github.com/rainoffallingstar/rs-reborn/cmd/rs@latest`) or pass --rs-path: %w", err)
+		}
+		rsPath = p
+	}
+	if ok, why := looksLikeRSReborn(rsPath); !ok {
+		return fmt.Errorf("found `rs` at %s but it does not look like rs-reborn (`rs run` not available): %s. Please install rs-reborn and ensure it is first on PATH, or pass --rs-path to the correct binary", rsPath, why)
+	}
+
+	args := []string{"run", "--cache-dir", opt.CacheDir}
+	if opt.SkipInstall {
+		args = append(args, "--no-install")
+	}
+	for _, ex := range opt.Exclude {
+		if strings.TrimSpace(ex) == "" {
 			continue
 		}
-		if ov, ok := os.LookupEnv(k); ok {
-			tmp := ov
-			old[k] = &tmp
-		} else {
-			old[k] = nil
-		}
-		_ = os.Setenv(k, v)
+		args = append(args, "--exclude", ex)
 	}
-	defer func() {
-		for k, ov := range old {
-			if ov == nil {
-				_ = os.Unsetenv(k)
-			} else {
-				_ = os.Setenv(k, *ov)
-			}
+	args = append(args, opt.ScriptPath)
+	args = append(args, opt.ScriptArgs...)
+
+	fmt.Fprintf(os.Stderr, "bulkde: exec: %s %s\n", rsPath, strings.Join(args, " "))
+
+	cmd := exec.Command(rsPath, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	// Inherit environment, then override with BULKDE_* variables.
+	env := os.Environ()
+	for k, v := range opt.Env {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			continue
 		}
-	}()
-	return fn()
+		env = append(env, k+"="+v)
+	}
+	cmd.Env = env
+
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func looksLikeRSReborn(rsPath string) (bool, string) {
+	// rs-reborn is expected to support: `rs run --help`.
+	// Note: many systems already ship a different `/usr/bin/rs` (column formatting tool),
+	// so we validate the subcommand exists to avoid false positives.
+	cmd := exec.Command(rsPath, "run", "--help")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return false, msg
+	}
+	help := strings.ToLower(string(out))
+	if strings.Contains(help, "rs run") || strings.Contains(help, "usage: rs run") {
+		return true, ""
+	}
+	return false, "unexpected help output (missing `rs run` usage)"
+}
+
+func bool01(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
 }
 
 func materializeEmbeddedScript(filename string, content string) (string, error) {

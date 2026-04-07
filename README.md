@@ -45,6 +45,7 @@ Outputs under `--out`:
 
 ## Notes
 
-- Requires `Rscript` on PATH. `bulkde` uses `rs-reborn` to scan/install R dependencies into an isolated cache, then runs the embedded R script.
-- `--cache-dir` controls the rs-reborn cache root (default: `<counts_dir>/r_libs`). `--r-lib` is a backwards-compatible alias.
+- Requires `R` and the `rs` CLI from `rs-reborn` on PATH. `bulkde` executes `rs run ...` to resolve R packages into an isolated cache, then runs the embedded R script.
+- `--cache-dir` controls the rs-reborn cache root (default: `<counts_dir>/r_libs`). `--r-lib` is a backwards-compatible alias. You can override the `rs` binary path via `--rs-path`.
+- Some systems already ship a different `/usr/bin/rs` tool (not rs-reborn). `bulkde` will validate `rs run --help` is available, otherwise it will error and ask you to pass `--rs-path`.
 - Backwards compatible alias: `--count` works as alias of `--counts`.
