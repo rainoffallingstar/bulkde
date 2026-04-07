@@ -313,25 +313,55 @@ func runWithRSCLI(opt runWithRSCLIOptions) error {
 }
 
 func looksLikeRSReborn(rsPath string) (bool, string) {
-	// rs-reborn is expected to support: `rs run --help`.
 	// Note: many systems already ship a different `/usr/bin/rs` (column formatting tool),
-	// so we validate the subcommand exists to avoid false positives.
-	cmd := exec.Command(rsPath, "run", "--help")
-	out, err := cmd.CombinedOutput()
-	help := strings.ToLower(string(out))
-	// Some implementations print usage to stderr and exit non-zero even when --help is passed
-	// (e.g. "missing R script path"). That's still a strong signal that this is rs-reborn.
-	if strings.Contains(help, "usage: rs run") {
-		return true, ""
-	}
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			msg = err.Error()
+	// so we validate presence of the "run" subcommand and the script-based usage shape.
+	//
+	// rs-reborn typically contains a line like:
+	//   rs run [flags] path/to/script.R [script args...]
+	// Some versions print this under `rs --help` (top-level), some under `rs run --help`,
+	// and some exit non-zero for `--help`. We accept any of these as long as the text matches.
+	matches := func(s string) bool {
+		h := strings.ToLower(s)
+		if strings.Contains(h, "rs manages a lightweight per-script r library") {
+			return true
 		}
-		return false, msg
+		if strings.Contains(h, "rs run [flags]") && strings.Contains(h, "script.r") {
+			return true
+		}
+		if strings.Contains(h, "usage: rs run") {
+			return true
+		}
+		return false
 	}
-	return false, "unexpected help output (missing `usage: rs run`)"
+
+	try := func(args ...string) (bool, string) {
+		cmd := exec.Command(rsPath, args...)
+		out, err := cmd.CombinedOutput()
+		txt := string(out)
+		if matches(txt) {
+			return true, ""
+		}
+		if err != nil {
+			msg := strings.TrimSpace(txt)
+			if msg == "" {
+				msg = err.Error()
+			}
+			return false, msg
+		}
+		return false, strings.TrimSpace(txt)
+	}
+
+	if ok, why := try("--help"); ok {
+		return true, ""
+	} else if why != "" {
+		// Continue to next probe; collect last message for debugging.
+	}
+	if ok, why := try("run", "--help"); ok {
+		return true, ""
+	} else if why != "" {
+		return false, why
+	}
+	return false, "missing rs-reborn markers in help output (expected `rs run [flags] path/to/script.R`)"
 }
 
 func bool01(b bool) string {

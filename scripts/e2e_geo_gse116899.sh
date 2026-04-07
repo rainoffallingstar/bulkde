@@ -23,9 +23,12 @@ if ! command -v rs >/dev/null 2>&1; then
   exit 2
 fi
 
-rs_help="$(rs run --help 2>&1 || true)"
-if ! echo "${rs_help}" | grep -qi "usage: rs run"; then
-  echo "[bulkde-e2e] ERROR: rs found but does not look like rs-reborn (missing: usage: rs run)." >&2
+rs_help="$(rs --help 2>&1 || true)"
+if ! echo "${rs_help}" | grep -Eqi "rs run \\[flags\\].*script\\.r"; then
+  rs_help="$(rs run --help 2>&1 || true)"
+fi
+if ! echo "${rs_help}" | grep -Eqi "rs run \\[flags\\].*script\\.r"; then
+  echo "[bulkde-e2e] ERROR: rs found but does not look like rs-reborn (missing: rs run [flags] path/to/script.R ...)." >&2
   echo "[bulkde-e2e] Hint: go install github.com/rainoffallingstar/rs-reborn/cmd/rs@latest" >&2
   exit 2
 fi
