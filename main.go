@@ -1,14 +1,16 @@
 package main
 
 import (
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
+
+	"github.com/rainoffallingstar/rs-reborn/pkg/runner"
 )
 
 //go:embed scripts/bulkde.R
@@ -35,7 +37,8 @@ type config struct {
 	markerThreshold string
 	markerOp        string
 
-	localLib        string
+	cacheDir        string
+	compatRLib      string
 	noInstall       bool
 
 	minCount        string
@@ -155,8 +158,9 @@ func main() {
 	fs.StringVar(&cfg.fdrThreshold, "fdr", "0.05", "Significance threshold for *_sig.tsv (FDR < fdr)")
 	fs.StringVar(&cfg.lfcThreshold, "lfc", "1", "Significance threshold for *_sig.tsv (|log2FC| >= lfc)")
 
-	// R deps
-	fs.StringVar(&cfg.localLib, "r-lib", "", "Local R library dir (default: <counts_dir>/r_libs)")
+	// R execution (rs-reborn)
+	fs.StringVar(&cfg.cacheDir, "cache-dir", "", "rs-reborn cache dir (default: <counts_dir>/r_libs)")
+	fs.StringVar(&cfg.compatRLib, "r-lib", "", "Alias of --cache-dir (compat)")
 	fs.BoolVar(&cfg.noInstall, "no-install", false, "Do not attempt to install R packages (fail if missing)")
 
 	_ = fs.Parse(args)
@@ -182,55 +186,30 @@ func main() {
 		os.Exit(2)
 	}
 
-	localLib := cfg.localLib
-	if localLib == "" {
-		// Prefer a stable default next to the counts file. If the user previously created a
-		// different r_libs_* folder, auto-reuse it to support offline runs without hardcoded names.
-		countsDir := filepath.Dir(countAbs)
-		preferred := filepath.Join(countsDir, "r_libs")
-		if dirExists(preferred) {
-			localLib = preferred
-		} else if reuse := findReusableRLib(countsDir); reuse != "" {
-			localLib = reuse
-		} else {
-			localLib = preferred
-		}
+	cacheDir := cfg.cacheDir
+	if cacheDir == "" {
+		cacheDir = cfg.compatRLib
 	}
-	localLibAbs, err := filepath.Abs(localLib)
+	if cacheDir == "" {
+		cacheDir = filepath.Join(filepath.Dir(countAbs), "r_libs")
+	}
+	cacheDirAbs, err := filepath.Abs(cacheDir)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR: resolve --r-lib:", err)
+		fmt.Fprintln(os.Stderr, "ERROR: resolve --cache-dir:", err)
+		os.Exit(2)
+	}
+	if err := os.MkdirAll(cacheDirAbs, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "ERROR: create cache dir:", err)
 		os.Exit(2)
 	}
 
-	tmpDir, err := os.MkdirTemp("", "bulkde-*")
+	scriptPath, err := materializeEmbeddedScript("bulkde.R", rScript)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR: create temp dir:", err)
-		os.Exit(2)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	scriptPath := filepath.Join(tmpDir, "bulkde.R")
-	if err := os.WriteFile(scriptPath, []byte(rScript), 0o755); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR: write embedded R script:", err)
-		os.Exit(2)
-	}
-
-	if _, err := exec.LookPath("Rscript"); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR: Rscript not found in PATH. Please install R and ensure Rscript is available.")
+		fmt.Fprintln(os.Stderr, "ERROR: materialize embedded R script:", err)
 		os.Exit(2)
 	}
 
 	fmt.Fprintf(os.Stderr, "bulkde: counts=%s out=%s group-from=%s methods=%s\n", countAbs, outAbs, cfg.groupFrom, cfg.methods)
-
-	cmd := exec.Command(
-		"Rscript",
-		scriptPath,
-		countAbs,
-		outAbs,
-	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
 
 	// Pass config via env (keeps R argv stable).
 	env := map[string]string{
@@ -255,50 +234,116 @@ func main() {
 		"BULKDE_METHODS":            cfg.methods,
 		"BULKDE_FDR":                cfg.fdrThreshold,
 		"BULKDE_LFC":                cfg.lfcThreshold,
-		"BULKDE_R_LIB":              localLibAbs,
-	}
-	if cfg.noInstall {
-		env["BULKDE_NO_INSTALL"] = "1"
-	}
-	for k, v := range env {
-		if v == "" {
-			continue
-		}
-		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
-	if err := cmd.Run(); err != nil {
+	exclude := excludeDepsForMethods(cfg.methods)
+
+	if err := withEnv(env, func() error {
+		return runner.Run(runner.RunOptions{
+			ScriptPath:    scriptPath,
+			ScriptArgs:    []string{countAbs, outAbs},
+			CacheDir:      cacheDirAbs,
+			SkipInstall:   cfg.noInstall,
+			ExcludeDeps:   exclude,
+			Stdout:        os.Stdout,
+			Stderr:        os.Stderr,
+			AutoInstallR:  false,
+			Verbose:       false,
+			Locked:        false,
+			Frozen:        false,
+			BootstrapToolchain: false,
+		})
+	}); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: differential analysis failed:", err)
 		os.Exit(1)
 	}
 }
 
-func dirExists(path string) bool {
-	st, err := os.Stat(path)
-	return err == nil && st.IsDir()
-}
-
-func findReusableRLib(parent string) string {
-	ents, err := os.ReadDir(parent)
-	if err != nil {
-		return ""
-	}
-	cands := make([]string, 0, 8)
-	for _, e := range ents {
-		if !e.IsDir() {
+func withEnv(kv map[string]string, fn func() error) error {
+	// Save old values and restore after run (runner inherits from os.Environ()).
+	old := make(map[string]*string, len(kv))
+	for k, v := range kv {
+		if v == "" {
 			continue
 		}
-		name := e.Name()
-		if strings.HasPrefix(name, "r_libs_") {
-			cands = append(cands, filepath.Join(parent, name))
+		if ov, ok := os.LookupEnv(k); ok {
+			tmp := ov
+			old[k] = &tmp
+		} else {
+			old[k] = nil
+		}
+		_ = os.Setenv(k, v)
+	}
+	defer func() {
+		for k, ov := range old {
+			if ov == nil {
+				_ = os.Unsetenv(k)
+			} else {
+				_ = os.Setenv(k, *ov)
+			}
+		}
+	}()
+	return fn()
+}
+
+func materializeEmbeddedScript(filename string, content string) (string, error) {
+	sum := sha256.Sum256([]byte(content))
+	hash := hex.EncodeToString(sum[:])
+
+	base := os.TempDir()
+	if d, err := os.UserCacheDir(); err == nil && d != "" {
+		base = d
+	}
+
+	dir := filepath.Join(base, "bulkde", "scripts", hash)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, filename)
+
+	// If exists and non-empty, reuse.
+	if st, err := os.Stat(path); err == nil && st.Size() > 0 {
+		return path, nil
+	}
+
+	// Atomic-ish write.
+	tmp := filepath.Join(dir, filename+".tmp")
+	if err := os.WriteFile(tmp, []byte(content), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		// If rename fails (e.g. cross-device), fallback to direct write.
+		_ = os.Remove(tmp)
+		if err2 := os.WriteFile(path, []byte(content), 0o755); err2 != nil {
+			return "", err2
 		}
 	}
-	sort.Strings(cands)
-	for _, d := range cands {
-		// We just need one usable library folder to support --no-install runs.
-		if dirExists(filepath.Join(d, "DESeq2")) || dirExists(filepath.Join(d, "edgeR")) || dirExists(filepath.Join(d, "limma")) {
-			return d
-		}
+	return path, nil
+}
+
+func excludeDepsForMethods(methodsRaw string) []string {
+	m := parseMethods(methodsRaw)
+	keepLimma := m["limma"]
+	keepDESeq2 := m["deseq2"]
+	// edgeR is always needed for CPM filtering.
+	var exclude []string
+	if !keepLimma {
+		exclude = append(exclude, "limma")
 	}
-	return ""
+	if !keepDESeq2 {
+		exclude = append(exclude, "DESeq2")
+	}
+	return exclude
+}
+
+func parseMethods(methodsRaw string) map[string]bool {
+	out := map[string]bool{}
+	for _, p := range strings.Split(methodsRaw, ",") {
+		p = strings.TrimSpace(strings.ToLower(p))
+		if p == "" {
+			continue
+		}
+		out[p] = true
+	}
+	return out
 }

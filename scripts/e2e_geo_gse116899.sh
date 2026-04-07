@@ -10,7 +10,7 @@ GSE_ID="${BULKDE_E2E_GSE_ID:-GSE116899}"
 URL="${BULKDE_E2E_URL:-https://ftp.ncbi.nlm.nih.gov/geo/series/GSE116nnn/GSE116899/suppl/GSE116899_ra-neut-counts-EnsembIDs-GRCh37.p10.txt.gz}"
 WORK_DIR="${BULKDE_E2E_WORK_DIR:-/tmp/bulkde-e2e-geo/${GSE_ID}}"
 OUT_DIR="${BULKDE_E2E_OUT_DIR:-${WORK_DIR}/out}"
-R_LIB="${BULKDE_E2E_R_LIB:-${WORK_DIR}/r_libs}"
+CACHE_DIR="${BULKDE_E2E_CACHE_DIR:-${WORK_DIR}/r_libs}"
 N_GENES="${BULKDE_E2E_N_GENES:-10000}"   # subset for speed
 METHODS="${BULKDE_E2E_METHODS:-limma}"   # keep fast by default
 NO_INSTALL="${BULKDE_E2E_NO_INSTALL:-0}" # default to self-contained (may install R packages)
@@ -99,7 +99,7 @@ args=(
   --methods "${METHODS}"
   --gene-id-col Geneid
   --annot-cols Chr,Start,End,Strand,Length
-  --r-lib "${R_LIB}"
+  --cache-dir "${CACHE_DIR}"
 )
 if [[ "${NO_INSTALL}" == "1" ]]; then
   args+=( --no-install )

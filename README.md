@@ -45,5 +45,6 @@ Outputs under `--out`:
 
 ## Notes
 
-- Requires `Rscript` on PATH. If `--no-install` is not set, it may try to install missing R/Bioconductor packages into `--r-lib`.
+- Requires `Rscript` on PATH. `bulkde` uses `rs-reborn` to scan/install R dependencies into an isolated cache, then runs the embedded R script.
+- `--cache-dir` controls the rs-reborn cache root (default: `<counts_dir>/r_libs`). `--r-lib` is a backwards-compatible alias.
 - Backwards compatible alias: `--count` works as alias of `--counts`.

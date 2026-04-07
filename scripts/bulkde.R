@@ -47,12 +47,6 @@ methods_raw <- tolower(getenv1("BULKDE_METHODS", "limma,deseq2,edger"))
 fdr_threshold <- as.numeric(getenv1("BULKDE_FDR", "0.05"))
 lfc_threshold <- as.numeric(getenv1("BULKDE_LFC", "1"))
 
-local_lib <- getenv1("BULKDE_R_LIB", file.path(getwd(), "r_libs"))
-no_install <- as_bool(getenv1("BULKDE_NO_INSTALL", "0"))
-
-dir.create(local_lib, recursive = TRUE, showWarnings = FALSE)
-.libPaths(c(normalizePath(local_lib, winslash = "/", mustWork = FALSE), .libPaths()))
-
 split_csv <- function(x) {
   x <- trimws(x)
   if (!nzchar(x)) return(character())
@@ -64,32 +58,6 @@ split_csv <- function(x) {
 methods <- unique(split_csv(methods_raw))
 methods <- methods[methods %in% c("limma", "deseq2", "edger")]
 if (length(methods) == 0) stop("No valid methods selected. Allowed: limma,deseq2,edger")
-
-ensure_packages <- function(pkgs, bioc_pkgs) {
-  cran_repo <- "https://cloud.r-project.org"
-  if (!requireNamespace("BiocManager", quietly = TRUE)) {
-    if (no_install) stop("Missing package BiocManager and BULKDE_NO_INSTALL=1")
-    install.packages("BiocManager", repos = cran_repo)
-  }
-
-  missing_pkgs <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
-  if (length(missing_pkgs) > 0) {
-    if (no_install) stop("Missing required packages and BULKDE_NO_INSTALL=1: ", paste(missing_pkgs, collapse = ", "))
-    cran_missing <- setdiff(missing_pkgs, bioc_pkgs)
-    bioc_missing <- intersect(missing_pkgs, bioc_pkgs)
-    if (length(cran_missing) > 0) install.packages(cran_missing, repos = cran_repo)
-    if (length(bioc_missing) > 0) BiocManager::install(bioc_missing, ask = FALSE, update = FALSE)
-  }
-
-  unresolved <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
-  if (length(unresolved) > 0) stop("Failed to install/load required packages: ", paste(unresolved, collapse = ", "))
-}
-
-required_pkgs <- c("BiocManager", "edgeR")
-if ("limma" %in% methods) required_pkgs <- c(required_pkgs, "limma")
-if ("deseq2" %in% methods) required_pkgs <- c(required_pkgs, "DESeq2")
-bioc_pkgs <- setdiff(required_pkgs, "BiocManager")
-ensure_packages(unique(required_pkgs), unique(bioc_pkgs))
 
 suppressPackageStartupMessages({
   library(edgeR)
