@@ -434,7 +434,6 @@ func materializeEmbeddedScript(filename string, content string) (string, error) 
 func excludeDepsForMethods(methodsRaw string, chipMode bool) []string {
 	m := parseMethods(methodsRaw)
 	keepLimma := m["limma"]
-	keepEdgeR := m["edger"]
 	keepDESeq2 := m["deseq2"]
 	var exclude []string
 	if !keepLimma {
@@ -443,7 +442,9 @@ func excludeDepsForMethods(methodsRaw string, chipMode bool) []string {
 	if !keepDESeq2 {
 		exclude = append(exclude, "DESeq2")
 	}
-	if chipMode || !keepEdgeR {
+	// edgeR is always needed for the RNA-seq path because filtering and limma-voom
+	// both rely on DGEList/cpm utilities. Only chip-mode can safely exclude it.
+	if chipMode {
 		exclude = append(exclude, "edgeR")
 	}
 	return exclude
