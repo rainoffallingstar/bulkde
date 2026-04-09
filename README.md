@@ -1,6 +1,6 @@
 # bulkde
 
-A small Go CLI wrapper that runs bulk RNA-seq differential expression via an embedded R script (limma-voom, DESeq2, edgeR).
+A small Go CLI wrapper that runs bulk RNA-seq differential expression via an embedded R script (limma-voom, DESeq2, edgeR), with an optional `--chip-mode` for preprocessed microarray/chip expression matrices.
 
 It performs:
 
@@ -10,6 +10,7 @@ It performs:
 - Prefiltering: keep genes with `counts >= min-count` in at least `min-samples` samples
 - Low-variance removal: drop the lowest `var-drop-quantile` by `var(log2(CPM+1))`
 - DE methods (same filtered genes): `limma-voom`, `DESeq2`, `edgeR (QL)`
+- Chip mode: `--chip-mode` treats the input as a preprocessed chip expression matrix, forces `limma` only, and skips RNA-seq-specific count filtering
 
 ## Build
 
@@ -28,6 +29,20 @@ Example (FOLH1 POS vs NEG):
   --out    /path/to/out_dir \
   --group-from marker \
   --marker FOLH1 \
+  --no-install
+```
+
+Chip / microarray example:
+
+```bash
+./bulkde run \
+  --counts /path/to/chip_expression.tsv \
+  --out /path/to/out_dir \
+  --group-from meta \
+  --meta /path/to/meta.tsv \
+  --case Tumor \
+  --control Normal \
+  --chip-mode \
   --no-install
 ```
 
@@ -51,3 +66,5 @@ Outputs under `--out`:
 - You can override the runner binary path via `--rvx-path` (`--rs-path` is a compat alias).
 - Some systems ship a different `/usr/bin/rs` tool (not rs-reborn). Prefer using `rvx` to avoid name conflicts.
 - Backwards compatible alias: `--count` works as alias of `--counts`.
+- `--chip-mode` is intended for already preprocessed chip/microarray expression matrices and runs `limma` only.
+- `bulkde` does not perform chip probe annotation, probe-to-gene collapsing, or duplicated-gene deduplication for chip inputs. Please complete probe annotation and gene deduplication before running `--chip-mode`.

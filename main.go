@@ -49,6 +49,7 @@ type config struct {
 	methods      string
 	fdrThreshold string
 	lfcThreshold string
+	chipMode     bool
 
 	// Compat flags
 	compatCount string
@@ -112,6 +113,9 @@ func (c *config) validate() error {
 	if c.lfcThreshold == "" {
 		c.lfcThreshold = "1"
 	}
+	if c.chipMode {
+		c.methods = "limma"
+	}
 	return nil
 }
 
@@ -158,6 +162,7 @@ func main() {
 	fs.StringVar(&cfg.methods, "methods", "limma,deseq2,edger", "Methods: limma,deseq2,edger (comma-separated subset allowed)")
 	fs.StringVar(&cfg.fdrThreshold, "fdr", "0.05", "Significance threshold for *_sig.tsv (FDR < fdr)")
 	fs.StringVar(&cfg.lfcThreshold, "lfc", "1", "Significance threshold for *_sig.tsv (|log2FC| >= lfc)")
+	fs.BoolVar(&cfg.chipMode, "chip-mode", false, "Treat input as preprocessed microarray/chip expression matrix; forces limma-only and skips RNA-seq-specific filtering")
 
 	// R execution (rs-reborn)
 	fs.StringVar(&cfg.cacheDir, "cache-dir", "", "rs-reborn cache dir (default: <counts_dir>/r_libs)")
@@ -237,10 +242,11 @@ func main() {
 		"BULKDE_METHODS":            cfg.methods,
 		"BULKDE_FDR":                cfg.fdrThreshold,
 		"BULKDE_LFC":                cfg.lfcThreshold,
+		"BULKDE_CHIP_MODE":          bool01(cfg.chipMode),
 		"BULKDE_NO_INSTALL":         bool01(cfg.noInstall),
 	}
 
-	exclude := excludeDepsForMethods(cfg.methods)
+	exclude := excludeDepsForMethods(cfg.methods, cfg.chipMode)
 
 	runnerPath := cfg.rvxPath
 	if runnerPath == "" {
@@ -425,17 +431,20 @@ func materializeEmbeddedScript(filename string, content string) (string, error) 
 	return path, nil
 }
 
-func excludeDepsForMethods(methodsRaw string) []string {
+func excludeDepsForMethods(methodsRaw string, chipMode bool) []string {
 	m := parseMethods(methodsRaw)
 	keepLimma := m["limma"]
+	keepEdgeR := m["edger"]
 	keepDESeq2 := m["deseq2"]
-	// edgeR is always needed for CPM filtering.
 	var exclude []string
 	if !keepLimma {
 		exclude = append(exclude, "limma")
 	}
 	if !keepDESeq2 {
 		exclude = append(exclude, "DESeq2")
+	}
+	if chipMode || !keepEdgeR {
+		exclude = append(exclude, "edgeR")
 	}
 	return exclude
 }

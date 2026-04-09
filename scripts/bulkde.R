@@ -50,6 +50,7 @@ var_drop_quantile <- as.numeric(getenv1("BULKDE_VAR_DROP_QUANTILE", "0.25"))
 methods_raw <- tolower(getenv1("BULKDE_METHODS", "limma,deseq2,edger"))
 fdr_threshold <- as.numeric(getenv1("BULKDE_FDR", "0.05"))
 lfc_threshold <- as.numeric(getenv1("BULKDE_LFC", "1"))
+chip_mode <- as_bool(getenv1("BULKDE_CHIP_MODE", "0"))
 
 split_csv <- function(x) {
   x <- trimws(x)
@@ -62,11 +63,16 @@ split_csv <- function(x) {
 methods <- unique(split_csv(methods_raw))
 methods <- methods[methods %in% c("limma", "deseq2", "edger")]
 if (length(methods) == 0) stop("No valid methods selected. Allowed: limma,deseq2,edger")
+if (chip_mode) {
+  methods <- "limma"
+}
 
 suppressPackageStartupMessages({
-  library(edgeR)
-  if ("limma" %in% methods) library(limma)
-  if ("deseq2" %in% methods) library(DESeq2)
+  library(limma)
+  if (!chip_mode) {
+    library(edgeR)
+    if ("deseq2" %in% methods) library(DESeq2)
+  }
 })
 
 covariates <- split_csv(covariates_raw)
@@ -157,7 +163,11 @@ if (any(is_htseq_summary, na.rm = TRUE)) {
 }
 
 counts_mat <- as.matrix(counts_df[, sample_cols, drop = FALSE])
-storage.mode(counts_mat) <- "integer"
+if (chip_mode) {
+  storage.mode(counts_mat) <- "double"
+} else {
+  storage.mode(counts_mat) <- "integer"
+}
 rownames(counts_mat) <- gene_ids
 
 gene_annot <- data.frame(gene_id = gene_ids, stringsAsFactors = FALSE, check.names = FALSE)
@@ -321,7 +331,7 @@ cfg <- data.frame(
     "case", "control", "covariates",
     "marker_gene", "marker_field", "marker_op", "marker_threshold",
     "min_count", "min_samples", "var_drop_quantile",
-    "methods", "fdr_threshold", "lfc_threshold",
+    "methods", "fdr_threshold", "lfc_threshold", "chip_mode",
     "r_lib", "no_install"
   ),
   value = c(
@@ -333,7 +343,7 @@ cfg <- data.frame(
     case_used, control_used, paste(covariates, collapse = ","),
     marker_gene, marker_field, marker_op, as.character(marker_threshold),
     as.character(min_count), as.character(min_samples), as.character(var_drop_quantile),
-    paste(methods, collapse = ","), as.character(fdr_threshold), as.character(lfc_threshold),
+    paste(methods, collapse = ","), as.character(fdr_threshold), as.character(lfc_threshold), ifelse(chip_mode, "1", "0"),
     normalizePath(local_lib, winslash = "/", mustWork = FALSE),
     ifelse(no_install, "1", "0")
   ),
@@ -342,16 +352,26 @@ cfg <- data.frame(
 write.table(cfg, file = file.path(out_dir, "run_config.tsv"), sep = "\t", row.names = FALSE, quote = FALSE)
 
 # Filtering
-keep_expression <- rowSums(counts_mat >= min_count) >= min_samples
-counts_expr <- counts_mat[keep_expression, , drop = FALSE]
-annot_expr <- gene_annot[keep_expression, , drop = FALSE]
-if (nrow(counts_expr) == 0) stop("Expression filter removed all genes; please revisit thresholds.")
+if (chip_mode) {
+  keep_expression <- rep(TRUE, nrow(counts_mat))
+  counts_expr <- counts_mat
+  annot_expr <- gene_annot
+} else {
+  keep_expression <- rowSums(counts_mat >= min_count) >= min_samples
+  counts_expr <- counts_mat[keep_expression, , drop = FALSE]
+  annot_expr <- gene_annot[keep_expression, , drop = FALSE]
+  if (nrow(counts_expr) == 0) stop("Expression filter removed all genes; please revisit thresholds.")
+}
 
 counts_filtered <- counts_expr
 annot_filtered <- annot_expr
 if (var_drop_quantile > 0) {
-  log_cpm <- cpm(counts_expr, log = TRUE, prior.count = 1)
-  gene_var <- apply(log_cpm, 1, var)
+  if (chip_mode) {
+    gene_var <- apply(counts_expr, 1, var)
+  } else {
+    log_cpm <- cpm(counts_expr, log = TRUE, prior.count = 1)
+    gene_var <- apply(log_cpm, 1, var)
+  }
   var_cutoff <- unname(stats::quantile(gene_var, probs = var_drop_quantile, na.rm = TRUE, type = 7))
   keep_variance <- gene_var > var_cutoff
   if (!any(keep_variance)) stop("Variance filter removed all genes; please revisit thresholds.")
@@ -436,12 +456,18 @@ deseq_out <- NULL
 edger_out <- NULL
 limma_out <- NULL
 
-dge <- DGEList(counts = counts_filtered)
-dge <- calcNormFactors(dge)
+if (!chip_mode) {
+  dge <- DGEList(counts = counts_filtered)
+  dge <- calcNormFactors(dge)
+}
 
 if ("limma" %in% methods) {
-  voom_obj <- voom(dge, design = design, plot = FALSE)
-  fit <- lmFit(voom_obj, design)
+  if (chip_mode) {
+    fit <- lmFit(counts_filtered, design)
+  } else {
+    voom_obj <- voom(dge, design = design, plot = FALSE)
+    fit <- lmFit(voom_obj, design)
+  }
   fit <- contrasts.fit(fit, contrast)
   fit <- eBayes(fit)
   limma_tbl <- topTable(fit, coef = 1, number = Inf, sort.by = "P")
@@ -514,6 +540,7 @@ cat("Contrast file:", normalizePath(file.path(out_dir, "contrast.tsv"), winslash
 cat("Samples: n=", nrow(analysis_df), " case=", pos_n, " control=", neg_n, "\n", sep = "")
 cat("Marker:", marker_gene, " field=", marker_field, " op=", marker_op, " threshold=", marker_threshold, " row_found=", length(marker_idx) == 1, "\n", sep = "")
 cat("Filtering: min_count=", min_count, " min_samples=", min_samples, " var_drop_quantile=", var_drop_quantile, "\n", sep = "")
+cat("Chip mode:", chip_mode, "\n")
 cat("Methods:", paste(methods, collapse = ","), "\n")
 cat("Sig: FDR<", fdr_threshold, " |log2FC|>=", lfc_threshold, "\n\n", sep = "")
 print(sessionInfo())
