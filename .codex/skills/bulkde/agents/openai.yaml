@@ -1,0 +1,7 @@
+interface:
+  display_name: "bulkde"
+  short_description: "Run local bulk RNA-seq differential expression with bulkde"
+  default_prompt: "Use $bulkde to run the local bulkde workflow on a counts matrix, choose the right grouping mode, and summarize the resulting DE tables."
+
+policy:
+  allow_implicit_invocation: true
